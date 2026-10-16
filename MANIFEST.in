@@ -1,0 +1,4 @@
+include CHANGELOG.md
+graft docs
+graft tests
+global-exclude __pycache__ *.py[cod]
