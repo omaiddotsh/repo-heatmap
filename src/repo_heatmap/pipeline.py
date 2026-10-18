@@ -94,16 +94,30 @@ def scan(path: str | os.PathLike[str], options: ScanOptions | None = None) -> Sc
 def collect_metrics(repo: GitRepo, options: ScanOptions) -> list[FileMetrics]:
     rules = ExcludeRules(tuple(options.exclude), tuple(options.include))
     if not repo.has_commits:
-        log.warning("%s has no commits yet, so there is nothing to score", repo.root)
+        # HEAD on an unborn branch is the normal state of `git init --bare` followed
+        # by a push to another branch name, and of `git checkout --orphan`.
+        if branches := repo.branches():
+            log.warning(
+                "HEAD of %s points at %s, which has no commits yet; commits exist on %s. "
+                "Check out one of those branches (or point HEAD at it) and scan again",
+                repo.root,
+                f"the unborn branch {repo.head_branch!r}" if repo.head_branch else "no branch",
+                ", ".join(branches),
+            )
+        else:
+            log.warning("%s has no commits yet, so there is nothing to score", repo.root)
         return []
     every = repo.tracked_files()
     tracked = [f for f in every if not rules.excludes(f.path)]
-    if every and not tracked:
+    where = f"under {repo.prefix}/" if repo.prefix else "in the repository"
+    if not every:
+        log.warning("there are no tracked files at HEAD %s, so there is nothing to score", where)
+    elif not tracked:
         log.warning(
             "all %d tracked files %s are left out by the exclusion rules (tests, "
             "documentation, manifests, ...); --include re-admits files a built-in rule drops",
             len(every),
-            f"under {repo.prefix}/" if repo.prefix else "in the repository",
+            where,
         )
     # History (git subprocesses) and the blame index (one git process) are
     # read in the background while this thread measures file content

@@ -58,9 +58,19 @@ def count_lines(content: bytes) -> int:
     return content.count(b"\n") + (0 if content.endswith(b"\n") else 1)
 
 
+def _lizard_name(path: str) -> str:
+    r"""
+    The file name lizard is given. It picks the language with `.*\.(ext)$`,
+    and `.*` stops at a newline, so a name containing one would find no reader
+    (and lizard would fall back to a reader that sees no functions). Only the
+    extension matters to it.
+    """
+    return path.rsplit("/", 1)[-1].replace("\n", "_").replace("\r", "_")
+
+
 def reader_for(path: str) -> type | None:
     """The lizard reader for a path's language, or None if lizard has none."""
-    return lizard.get_reader_for(path)  # type: ignore[no-any-return]
+    return lizard.get_reader_for(_lizard_name(path))  # type: ignore[no-any-return]
 
 
 def measure(path: str, content: bytes) -> ComplexityMetrics | None:
@@ -80,7 +90,7 @@ def measure(path: str, content: bytes) -> ComplexityMetrics | None:
     lizard_said = io.StringIO()
     try:
         with contextlib.redirect_stderr(lizard_said), _time_limit(MAX_SECONDS):
-            info = _ANALYZER.analyze_source_code(path, text)
+            info = _ANALYZER.analyze_source_code(_lizard_name(path), text)
     except _TimeUp:
         log.warning(
             "gave up measuring %s after %g seconds; its complexity scores as neutral",
@@ -158,7 +168,12 @@ def _time_limit(seconds: float) -> Iterator[None]:
 
 def comment_density(text: str) -> float:
     """Share of lines that start with a single-line comment marker."""
-    lines = text.splitlines()
+    # Split on "\n" only (`_decode` has normalised CR and CRLF): str.splitlines
+    # also breaks on form feeds and Unicode separators, which would make the
+    # denominator disagree with the file's line count.
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
     if not lines:
         return 0.0
     return sum(1 for line in lines if line.lstrip().startswith(_COMMENT_PREFIXES)) / len(lines)

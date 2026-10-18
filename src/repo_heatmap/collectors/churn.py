@@ -35,7 +35,7 @@ def collect(
             churn_absolute=churn_absolute,
             churn_relative=churn_absolute / max(locs.get(path, 0), 1),
             commit_count=len(shas),
-            churn_recency_days=(today - active_days[-1]).days if active_days else None,
+            churn_recency_days=max(0, (today - active_days[-1]).days) if active_days else None,
             churn_burstiness=burstiness(active_days),
         )
     return out

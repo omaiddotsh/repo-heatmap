@@ -81,6 +81,6 @@ def collect(
             distinct_authors=len(authors),
             ownership_concentration=share,
             bus_factor_flag=len(authors) == 1,
-            days_since_any_commit=(today - last).days if last else None,
+            days_since_any_commit=max(0, (today - last).days) if last else None,
         )
     return out

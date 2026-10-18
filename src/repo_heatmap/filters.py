@@ -185,6 +185,10 @@ def _glob_regex(pattern: str) -> re.Pattern[str]:
             body = pattern[i + 1 : end].replace("\\", "\\\\")
             if body.startswith("!"):
                 body = "^" + body[1:]
+            # Inside a class, `re` reserves "[" (nested sets) and "&&", "||",
+            # "~~", "--" (set operations), warning about them; in a glob they
+            # are plain characters.
+            body = re.sub(r"[\[&|~]", lambda m: "\\" + m.group(), body)
             out.append(f"(?!/)[{body}]")  # like '*' and '?', a class never matches '/'
             i = end + 1
             continue

@@ -416,3 +416,79 @@ def test_python_dash_m_entry_point(project, tmp_path) -> None:
     )
     assert scan.returncode == 0, scan.stderr
     assert scan.stdout == ""  # progress goes to stderr
+
+
+def test_explain_absolute_path_outside_the_scoped_directory_is_an_error(project, capsys) -> None:
+    # An absolute path names one file; it must not be re-rooted under REPO's
+    # directory and explain a different file with the same name.
+    project.write("app.py", "def root():\n    return 0\n")
+    project.commit(day="2024-03-02")
+    assert main(["explain", str(project.root / "src"), str(project.root / "app.py"), "-q"]) == 1
+    err = capsys.readouterr().err
+    assert "app.py is not a tracked file at HEAD in the scanned directory" in err
+    assert "src/app.py" not in err.replace("scanned", "")
+
+
+def test_explain_prefers_the_scoped_directory_for_a_nested_same_name(project, capsys) -> None:
+    # REPO=src and FILE=src/x.py means src/src/x.py when that exists.
+    project.write("src/x.py", "def top():\n    return 1\n")
+    project.write("src/src/x.py", "def nested():\n    return 2\n")
+    project.commit(day="2024-03-03")
+    assert main(["explain", str(project.root / "src"), "src/x.py", "-q"]) == 0
+    assert capsys.readouterr().out.startswith("src/src/x.py\n")
+
+
+def test_top_percentage_is_exact(project, tmp_path) -> None:
+    from repo_heatmap.cli import Top
+
+    # 64.4% of 250 is exactly 161; floating point says 161.00000000000003.
+    assert Top(percent=64.4).of(250) == 161
+    assert Top(percent=8.8).of(375) == 33
+    assert Top(percent=20).of(44) == 9
+    assert Top(percent=1).of(1) == 1
+    assert Top(percent=100).of(7) == 7
+
+
+def test_failed_scan_leaves_no_empty_output_directory(tmp_path, capsys) -> None:
+    out = tmp_path / "fresh"
+    assert main(["scan", str(tmp_path / "notrepo"), "-o", str(out), "-q"]) == 1
+    assert not out.exists()
+    # A directory the user already had is left alone.
+    existing = tmp_path / "mine"
+    existing.mkdir()
+    assert main(["scan", str(tmp_path / "notrepo"), "-o", str(existing), "-q"]) == 1
+    assert existing.is_dir()
+
+
+def test_unborn_head_says_where_the_commits_are(project, tmp_path, capsys) -> None:
+    # `git init --bare` then a push to another branch name leaves HEAD unborn.
+    bare = tmp_path / "bare.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "master", str(bare)], check=True)
+    project.git("push", "-q", str(bare), "HEAD:refs/heads/main")
+    assert main(["scan", str(bare), "-o", str(tmp_path / "o"), "-q"]) == 0
+    err = capsys.readouterr().err
+    assert "unborn branch 'master'" in err
+    assert "commits exist on main" in err
+
+
+def test_scan_of_a_directory_with_no_tracked_files_warns(project, tmp_path, capsys) -> None:
+    (project.root / "untracked_dir").mkdir()
+    assert main(["scan", str(project.root / "untracked_dir"), "-o", str(tmp_path / "o")]) == 0
+    assert "no tracked files at HEAD under untracked_dir/" in capsys.readouterr().err
+
+
+def test_exclude_glob_with_a_bracket_class_is_quiet(project, tmp_path) -> None:
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # a FutureWarning from `re` would raise here
+        assert (
+            main(["scan", str(project.root), "-o", str(tmp_path / "o"), "-q", "--exclude", "[[]"])
+            == 0
+        )
+        assert (
+            main(
+                ["scan", str(project.root), "-o", str(tmp_path / "p"), "-q", "--exclude", "[&&|~-]"]
+            )
+            == 0
+        )

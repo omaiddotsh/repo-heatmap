@@ -6,6 +6,7 @@ Progress and warnings go to stderr so stdout stays clean for piping.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import math
 import os
@@ -16,6 +17,7 @@ import unicodedata
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from fractions import Fraction
 from pathlib import Path
 from types import FrameType
 
@@ -177,8 +179,15 @@ def build_parser() -> argparse.ArgumentParser:
 def _cmd_scan(args: argparse.Namespace) -> int:
     options = _scan_options(args)
     out_dir: Path = args.output
-    _ensure_dir(out_dir)
-    result = scan(args.repo, options)
+    created = not out_dir.exists()
+    _ensure_dir(out_dir)  # fail before the scan if the reports could not be written
+    try:
+        result = scan(args.repo, options)
+    except BaseException:
+        if created:
+            with contextlib.suppress(OSError):
+                out_dir.rmdir()  # only if still empty: nothing of the user's is touched
+        raise
     top: Top = args.top
     top_n = top.of(len(result.files))
     try:
@@ -255,14 +264,14 @@ def _find(result: ScanResult, given: str, prefix: str | None) -> FileScore:
     A relative path may be relative to the root or to the `prefix` directory.
     """
     path = Path(given)
-    if path.is_absolute():
+    absolute = path.is_absolute()
+    if absolute:
         path = _relative_to(path, result.root, given)
     rel = path.as_posix().removeprefix("./")
-    # REPO-relative first: with REPO=src, "utils.py" means src/utils.py even
-    # if the repository root has a utils.py too.
-    candidates = [rel]
-    if prefix and not rel.startswith(prefix + "/"):
-        candidates.insert(0, f"{prefix}/{rel}")
+    # An absolute path names exactly one file. A relative one is REPO-relative
+    # first: with REPO=src, "utils.py" means src/utils.py even if the repository
+    # root has a utils.py too, and "src/x.py" means src/src/x.py if that exists.
+    candidates = [rel] if absolute or not prefix else [f"{prefix}/{rel}", rel]
 
     for candidate in candidates:
         if (found := result.find(candidate) or _respelled(result, candidate)) is not None:
@@ -354,7 +363,10 @@ class Top:
         if self.count is not None:
             return min(self.count, total)
         # Rounded up, so any share of a non-empty scan keeps at least one file.
-        return min(total, math.ceil(total * (self.percent or 0) / 100))
+        # Exact arithmetic: in binary floating point 250 * 64.4 / 100 is a hair
+        # over 161, and ceil would keep one file too many.
+        share = Fraction(repr(self.percent or 0))
+        return min(total, math.ceil(total * share / 100))
 
     @property
     def share(self) -> str | None:

@@ -207,3 +207,40 @@ def test_a_time_limit_expiring_as_lizard_finishes_is_harmless(monkeypatch) -> No
         complexity.measure("a.c", source)  # metrics, or None if time ran out
     assert signal.getsignal(signal.SIGALRM) == before
     assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
+
+
+def test_comment_density_counts_lines_like_loc() -> None:
+    # A form feed is a line separator for str.splitlines but not for `loc`.
+    src = "int x;\n// a comment\n\x0c\nint y;\nint z;\nint w;\nint v;\nint u;\n"
+    assert complexity.count_lines(src.encode()) == 8
+    assert complexity.comment_density(src) == 1 / 8
+    assert complexity.comment_density("") == 0.0
+    assert complexity.comment_density("# only\n") == 1.0
+    assert complexity.comment_density("# no trailing newline") == 1.0
+
+
+def test_recency_is_never_negative_for_future_dated_commits() -> None:
+    today = date(2024, 6, 1)
+    out = churn.collect(
+        [ev("1", "2031-01-01", path="src/a.py"), ev("2", "2024-05-01", path="src/a.py")],
+        {"src/a.py": 10},
+        today=today,
+    )
+    assert out["src/a.py"].churn_recency_days == 0
+    out2 = churn.collect([ev("1", "2024-05-01", path="src/a.py")], {"src/a.py": 10}, today=today)
+    assert out2["src/a.py"].churn_recency_days == 31
+
+
+def test_days_since_any_commit_is_never_negative(tmp_path) -> None:
+    events = [ev("a", "2031-01-01"), ev("b", "2024-01-02")]
+    m = activity.collect(events, GitRepo(tmp_path), {"f.py": 0}, today=TODAY)["f.py"]
+    assert m.days_since_any_commit == 0
+
+
+def test_a_file_name_with_a_newline_is_still_measured() -> None:
+    src = b"def f(x):\n    if x:\n        return 1\n    return 0\n"
+    assert complexity.reader_for("src/new\nline.py") is not None
+    assert complexity.reader_for("new\rline.py") is not None
+    assert complexity.reader_for("src/plain.unknownext") is None
+    measured = complexity.measure("src/new\nline.py", src)
+    assert measured is not None and measured.function_count == 1

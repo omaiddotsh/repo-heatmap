@@ -677,3 +677,29 @@ def test_blame_of_a_missing_file_is_none(repo) -> None:
     repo.write("a.py")
     repo.commit()
     assert GitRepo.open(repo.root).blame_authors("missing.py") is None
+
+
+def test_git_runs_in_the_c_locale(repo, monkeypatch) -> None:
+    # git translates its messages; the error branches match the English text,
+    # and LC_ALL beats LANGUAGE/LANG.
+    env = git_module._environment(
+        {"LANG": "de_DE.UTF-8", "LANGUAGE": "de", "LC_ALL": "de_DE.UTF-8"}
+    )
+    assert env["LC_ALL"] == "C"
+    monkeypatch.setenv("LC_ALL", "de_DE.UTF-8")
+    monkeypatch.setenv("LANGUAGE", "de")
+    with pytest.raises(HeatmapError, match="Not a git repository"):
+        GitRepo.open(repo.root.parent)
+
+
+def test_head_branch_and_branches(repo) -> None:
+    repo.write("a.py")
+    repo.commit()
+    g = GitRepo.open(repo.root)
+    assert g.head_branch == "main"
+    assert g.branches() == ["main"]
+    repo.git("checkout", "-q", "--orphan", "fresh")
+    g = GitRepo.open(repo.root)
+    assert not g.has_commits
+    assert g.head_branch == "fresh"
+    assert g.branches() == ["main"]

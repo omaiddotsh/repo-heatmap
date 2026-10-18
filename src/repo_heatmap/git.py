@@ -157,8 +157,12 @@ def _environment(env: dict[str, str] | None) -> dict[str, str]:
     # refs/replace/*, which could swap a file's content or history for a
     # decoy, and a copied .git directory can carry grafts that do the same.
     # GIT_ATTR_NOSYSTEM: the machine's attributes can't change results either.
+    # LC_ALL=C: git's messages are translated, and the error branches below
+    # match their English text ("not a git repository", "dubious ownership").
+    # It does not affect how git handles paths or dates.
     return {
         **base,
+        "LC_ALL": "C",
         "GIT_NO_LAZY_FETCH": "1",
         "GIT_TERMINAL_PROMPT": "0",
         "GIT_LITERAL_PATHSPECS": "1",
@@ -348,6 +352,23 @@ class GitRepo:
     @property
     def has_commits(self) -> bool:
         return self.head is not None
+
+    @property
+    def head_branch(self) -> str | None:
+        """The branch HEAD points at (e.g. "main"), or None when detached."""
+        try:
+            ref = self.run("symbolic-ref", "--quiet", "HEAD").decode("utf-8", "replace").strip()
+        except GitError:
+            return None
+        return ref.removeprefix("refs/heads/") or None
+
+    def branches(self) -> list[str]:
+        """Local branches that have commits, by name."""
+        try:
+            out = self.run("for-each-ref", "--format=%(refname:short)", "refs/heads/")
+        except GitError:
+            return []
+        return [line for line in out.decode("utf-8", "replace").split("\n") if line]
 
     def has_commit(self, sha: str) -> bool:
         """True if `sha`, a full commit id, names a commit in this repository."""

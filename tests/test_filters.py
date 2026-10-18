@@ -154,3 +154,23 @@ def test_invalid_globs_are_rejected_up_front(bad: str) -> None:
         ExcludeRules((bad,))
     with pytest.raises(HeatmapError, match="invalid --include pattern"):
         ExcludeRules(include_globs=(bad,))
+
+
+@pytest.mark.parametrize(
+    ("pattern", "path", "matches"),
+    [
+        ("[[]x.py", "[x.py", True),
+        ("[[]x.py", "ax.py", False),
+        ("a[&|~]b.py", "a&b.py", True),
+        ("a[&|~]b.py", "a|b.py", True),
+        ("a[&|~]b.py", "a~b.py", True),
+        ("a[&|~]b.py", "a-b.py", False),
+        ("a[--]b.py", "a-b.py", True),
+    ],
+)
+def test_regex_set_syntax_inside_a_class_is_literal(pattern: str, path: str, matches: bool) -> None:
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert glob_matches(path, pattern) is matches
